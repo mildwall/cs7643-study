@@ -1,0 +1,1 @@
+import{r as e}from"./quiz.BGFj6lEx.js";e();

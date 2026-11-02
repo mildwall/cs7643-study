@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>CS 7643 companion</title>
+    <link rel="icon" href="/cs7643-study/favicon.svg" type="image/svg+xml" />
+    <style>
+      :root { color-scheme: light dark; --ground: #00452e; --ink: #e4f1ea; --soft: #a9c9b9; --accent: #8dce46; --accent-ink: #17260a; --error: #ffd27a; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: 1.5rem;
+        background: var(--ground);
+        color: var(--ink);
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      }
+      main { width: min(22rem, 100%); }
+      h1 { margin: 0 0 0.4rem; font-size: 1.75rem; line-height: 1.15; letter-spacing: -0.01em; }
+      p { margin: 0 0 1.25rem; color: var(--soft); line-height: 1.45; }
+      label { display: block; margin-bottom: 0.35rem; font-weight: 600; }
+      input {
+        display: block;
+        width: 100%;
+        padding: 0.65rem 0.75rem;
+        background: #003322;
+        color: var(--ink);
+        border: 1px solid var(--soft);
+        border-radius: 4px;
+        font: inherit;
+        caret-color: var(--accent);
+      }
+      button {
+        margin-top: 0.75rem;
+        width: 100%;
+        padding: 0.65rem 0.75rem;
+        background: var(--accent);
+        color: var(--accent-ink);
+        border: 0;
+        border-radius: 4px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button[disabled] { opacity: 0.6; cursor: progress; }
+      :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+      #message { min-height: 1.5em; margin: 0.75rem 0 0; color: var(--error); }
+      ::selection { background: var(--accent); color: var(--accent-ink); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>CS 7643 companion</h1>
+      <p>Enter the access code to open your study site.</p>
+      <form id="form">
+        <label for="code">Access code</label>
+        <input id="code" type="password" autocomplete="current-password" autofocus required />
+        <button id="go" type="submit">Open</button>
+        <p id="message" role="alert"></p>
+      </form>
+    </main>
+    <script type="module">
+      const BASE = '/cs7643-study/';
+      const form = document.getElementById('form');
+      const code = document.getElementById('code');
+      const go = document.getElementById('go');
+      const message = document.getElementById('message');
+
+      const saveKey = (key) => new Promise((resolve, reject) => {
+        const req = indexedDB.open('cs7643-gate', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('kv');
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const tx = req.result.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put(key, 'key');
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+        };
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        go.disabled = true;
+        message.textContent = '';
+        try {
+          if (!crypto.subtle || !navigator.serviceWorker) throw new Error('unsupported');
+          const meta = await (await fetch(`${BASE}vault/meta.json`, { cache: 'no-cache' })).json();
+          const salt = Uint8Array.from(atob(meta.salt), (c) => c.charCodeAt(0));
+          const raw = await crypto.subtle.importKey('raw', new TextEncoder().encode(code.value), 'PBKDF2', false, ['deriveKey']);
+          const key = await crypto.subtle.deriveKey(
+            { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: meta.iterations },
+            raw,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['decrypt'],
+          );
+          const data = new Uint8Array(await (await fetch(`${BASE}vault/manifest.bin`, { cache: 'no-cache' })).arrayBuffer());
+          try {
+            await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.slice(0, 12) }, key, data.slice(12));
+          } catch {
+            message.textContent = 'That code is not right. Check it and try again.';
+            go.disabled = false;
+            code.select();
+            return;
+          }
+          await saveKey(key);
+          await navigator.serviceWorker.register(`${BASE}sw.js`);
+          await navigator.serviceWorker.ready;
+          location.reload();
+        } catch (err) {
+          go.disabled = false;
+          message.textContent = err.message === 'unsupported'
+            ? 'This browser cannot open the site here. Private windows sometimes block it, so try a normal window.'
+            : 'The site did not load. Check your connection and try again.';
+        }
+      });
+    </script>
+  </body>
+</html>
