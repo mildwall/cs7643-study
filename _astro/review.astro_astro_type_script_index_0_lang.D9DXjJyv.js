@@ -1,0 +1,1 @@
+import{r as e}from"./quiz.BoUASQHu.js";e();
